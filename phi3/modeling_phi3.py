@@ -322,6 +322,12 @@ class Phi3Attention(nn.Module):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
+        tmp = {
+            'q': query_states.detach().float().cpu(),
+            'k': key_states.detach().float().cpu(),
+        }
+        # q,k,v shape after transpose: (bsz, num_heads, seq_len, head_dim)
+
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             if self.layer_idx is None:
@@ -334,6 +340,11 @@ class Phi3Attention(nn.Module):
         cos, sin = self.rotary_emb(value_states, position_ids, seq_len=kv_seq_len)
 
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+
+        tmp['q_rope'] = query_states.detach().float().cpu()
+        tmp['k_rope'] = key_states.detach().float().cpu()
+
+
 
         if past_key_value is not None:
             cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -375,10 +386,12 @@ class Phi3Attention(nn.Module):
 
         attn_output = self.o_proj(attn_output)
 
+        tmp['attn_weights'] = attn_weights.detach().float().cpu()
+
         if not output_attentions:
             attn_weights = None
 
-        return attn_output, attn_weights, past_key_value
+        return attn_output, tmp, past_key_value
 
 
 class Phi3FlashAttention2(Phi3Attention):
@@ -793,7 +806,8 @@ class Phi3DecoderLayer(nn.Module):
         super().__init__()
 
         self.config = config
-        self.self_attn = PHI3_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx=layer_idx)
+        #self.self_attn = PHI3_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx=layer_idx)
+        self.self_attn = PHI3_ATTENTION_CLASSES["eager"](config, layer_idx=layer_idx)
 
         self.mlp = Phi3MLP(config)
         self.input_layernorm = Phi3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
